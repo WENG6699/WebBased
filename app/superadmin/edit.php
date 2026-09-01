@@ -1,55 +1,17 @@
-<?php require '../../_base.php'; ?>
+<?php require '../_base.php'; ?>
 <?php auth('Super Admin'); ?>
 <?php
 
-// Entry point: list.php / dashboard.php POST the target id here once,
-// we stash it in the session, then redirect to a clean URL with no
-// ?id= in it. Every request after that (page reload, update form,
-// toggle_status form) reads the id back out of the session instead
-// of the query string, so the admin's id is never exposed in the URL.
-if (is_post() && post('id') !== null && post('action') === null) {
-    $_SESSION['manage_admin_id'] = post('id');
-    redirect('/superadmin/admins/edit.php');
-}
-
-$id = $_SESSION['manage_admin_id'] ?? null;
-
-if (!$id) {
-    temp('info', 'Select an admin to manage first.');
-    redirect('/superadmin/admins/list.php');
-}
-
-// Deliberately scoped to role = Admin only — Super Admin accounts are
-// never editable through this page, even by another Super Admin.
-$stm = $pdo->prepare("SELECT * FROM member WHERE member_id = ? AND role = 'Admin'");
-$stm->execute([$id]);
-$admin = $stm->fetch();
-
-if (!$admin) {
-    unset($_SESSION['manage_admin_id']);
-    temp('info', 'Admin not found.');
-    redirect('/superadmin/admins/list.php');
-}
-
 $_err = [];
-$action = post('action');
 
-if (is_post() && $action == 'toggle_status') {
-    $new_status = $admin->status == 'Active' ? 'Blocked' : 'Active';
-    $pdo->prepare("UPDATE member SET status = ? WHERE member_id = ?")->execute([$new_status, $admin->member_id]);
-    $admin->status = $new_status;
-    temp('info', 'Admin has been ' . ($new_status == 'Active' ? 'activated.' : 'deactivated.'));
-    redirect('/superadmin/admins/edit.php');
-}
-
-if (is_post() && $action == 'update') {
+if (is_post()) {
     $username = post('username');
     $email = post('email');
     $phone = post('phone');
 
     if (!$username) {
         $_err['username'] = 'Username is required';
-    } elseif (!is_unique('member', 'username', $username, $admin->member_id, 'member_id')) {
+    } elseif (!is_unique('member', 'username', $username, $_user->member_id, 'member_id')) {
         $_err['username'] = 'Username is already taken';
     }
 
@@ -57,7 +19,7 @@ if (is_post() && $action == 'update') {
         $_err['email'] = 'Email is required';
     } elseif (!is_email($email)) {
         $_err['email'] = 'Invalid email format';
-    } elseif (!is_unique('member', 'email', $email, $admin->member_id, 'member_id')) {
+    } elseif (!is_unique('member', 'email', $email, $_user->member_id, 'member_id')) {
         $_err['email'] = 'Email is already registered';
     }
 
@@ -69,38 +31,38 @@ if (is_post() && $action == 'update') {
 
     if (!$_err) {
         $pdo->prepare("UPDATE member SET username = ?, email = ?, phone = ?, updated_at = NOW() WHERE member_id = ?")
-            ->execute([$username, $email, $phone, $admin->member_id]);
+            ->execute([$username, $email, $phone, $_user->member_id]);
 
-        unset($_SESSION['manage_admin_id']);
-        temp('info', 'Admin details updated.');
-        redirect('/superadmin/admins/list.php');
+        // Keep session user object in sync so the header/profile page
+        // reflects the change immediately without needing to re-login.
+        $_user->username = $username;
+        $_user->email = $email;
+        $_user->phone = $phone;
+
+        temp('info', 'Profile updated successfully.');
+        redirect('/superadmin/profile.php');
     }
 }
 
-$username = $admin->username;
-$email = $admin->email;
-$phone = $admin->phone;
+$username = $username ?? $_user->username;
+$email = $email ?? $_user->email;
+$phone = $phone ?? $_user->phone;
 
-$_title = 'Manage Admin';
-require '../../_head.php';
+$_title = 'Edit Profile';
+require '../_head.php';
 ?>
 
-<h1>Manage Admin</h1>
+<h1>Edit Profile</h1>
 
 <div class="user-chip" style="margin-bottom:24px;">
-    <?= user_avatar($admin, 48) ?>
+    <?= user_avatar($_user, 48) ?>
     <div>
-        <strong style="display:block;"><?= h($admin->username) ?></strong>
-        <span style="color:var(--muted); font-size:13px;">
-            <?= h($admin->status) ?> · Registered <?= h($admin->created_at) ?>
-        </span>
+        <strong style="display:block;"><?= h($_user->username) ?></strong>
+        <span style="color:var(--muted); font-size:13px;"><?= h($_user->role) ?></span>
     </div>
 </div>
 
-<h2>Edit Details</h2>
 <form method="post" novalidate>
-    <input type="hidden" name="action" value="update">
-
     <label for="username">Username</label>
     <?= html_text('username') ?>
     <?= err('username') ?>
@@ -114,25 +76,7 @@ require '../../_head.php';
     <?= err('phone') ?>
 
     <button>Save Changes</button>
-    <a href="/superadmin/admins/list.php">Cancel</a>
+    <a href="/superadmin/profile.php">Cancel</a>
 </form>
 
-<h2>Account Status</h2>
-<p style="color:var(--muted); max-width:480px;">
-    <?php if ($admin->status == 'Active'): ?>
-        This admin can currently log in and use the admin dashboard. Deactivating blocks their access immediately without deleting the account.
-    <?php else: ?>
-        This admin is currently blocked from logging in. Activating restores their access immediately.
-    <?php endif; ?>
-</p>
-<form method="post" style="max-width:none;">
-    <input type="hidden" name="action" value="toggle_status">
-    <button class="<?= $admin->status == 'Active' ? 'btn-danger' : '' ?>"
-            data-confirm="<?= $admin->status == 'Active' ? 'Deactivate this admin account?' : 'Activate this admin account?' ?>">
-        <?= $admin->status == 'Active' ? 'Deactivate Admin' : 'Activate Admin' ?>
-    </button>
-</form>
-
-<p style="margin-top:32px;"><a href="/superadmin/admins/list.php" class="btn-outline">Back to Admin List</a></p>
-
-<?php require '../../_foot.php'; ?>
+<?php require '../_foot.php'; ?>
